@@ -1,0 +1,749 @@
+---
+title: "Sparrow M3C3_Nimbl"
+author: "Martinius T. Singdahlsen"
+date: "2025-04-15"
+output: html_document
+---
+
+## Setup of packages, the R-markdown document and data frames
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,message=FALSE,warning=FALSE,strip.white=TRUE,prompt=FALSE,
+                     cache=TRUE, size="scriptsize",fig.width=4, fig.height=3,fig.align = "center")
+
+library(nimble)
+library(tidyr) #Has replace_na() func
+library(dplyr)
+library(jagsUI)
+library(tidybayes)
+library(brms)
+library(latex2exp)
+library(ggplot2)
+library(GGally)
+library(boot) #for logit function
+```
+
+### Data frame creation
+
+## The capture histories
+
+```{r}
+#Df of all observations
+s.df <- read.table('C:\\Users\\Martinius T.S\\Documents\\MSMNFMA\\Master related\\Saved data\\df sparrow\\all_inds_juv_ad.txt',sep=",", header = 1)
+
+head(s.df)
+
+#Df of only island of interest
+assign("s27.df",subset(s.df,s.df$Island== 27))
+s27.df$date <- as.Date(s27.df$date, format="%Y-%m-%d") #Set it to date and not character
+
+#Df of only island of interest with own column for just date in year
+assign("s27.sep.df",s27.df)
+s27.sep.df$time <- as.Date(format(s27.sep.df$date, "%m-%d"),format="%m-%d") # This is all year 2025?!
+s27.sep.df$year <- as.numeric(format(s27.sep.df$date, "%Y"))
+#s27.sep.df <- subset(s27.sep.df,select= -c(date))
+
+#Everything above --> with no DNA observations
+assign("s27.filled.df",subset(s27.sep.df,s27.sep.df$filled== "no"))
+#s27.filled.df <- replace_na(s27.filled.df,list(sex="u")) We want NA as sex
+```
+
+## Morphology
+
+
+```{r}
+
+
+morph.df <- read.table('C:\\Users\\Martinius T.S\\Documents\\MSMNFMA\\Master related\\Saved data\\df sparrow\\morphology.csv',sep=",", header = 1)
+head(morph.df)
+
+#assign("morph27.df",subset(morph.df,morph.df$flok== 27)) #This restricts to island 27
+morph.df <- morph.df %>%  # We set filed observation of sex to a number
+  mutate(fieldsex = recode(fieldsex,"f"=1,"u"=0,"m"=2,"pm"=0,"pf"=0))
+morph.df <- morph.df %>% # Set NA to zero
+  mutate(fieldsex = ifelse(is.na(fieldsex), 0, fieldsex))
+
+morph.df <- morph.df %>% # We set dna observation of sex to a number
+  mutate(scriptsex = recode(scriptsex,"f"=1,"u"=0,"m"=2,"pm"=0,"pf"=0))
+morph.df <- morph.df %>% # Set NA to zero
+  mutate(scriptsex = ifelse(is.na(scriptsex), 0, scriptsex))
+
+time.cov.df <- morph.df
+time.cov.df$flok <- NULL
+time.cov.df$flokb <- NULL
+time.cov.df$fieldsex <- NULL
+time.cov.df$scriptsex <- NULL
+time.cov.df$scriptage <- NULL
+time.cov.df$stage <- NULL
+time.cov.df$init <- NULL
+time.cov.df$hs_id <- NULL
+time.cov.df$dato <- as.Date(time.cov.df$dato, format="%d/%m/%Y")
+time.cov.df$year <- as.numeric(format(time.cov.df$dato, "%Y"))
+time.cov.df$census <- time.cov.df$year - 1992 #So that first census is 1
+
+#time.cov.df$tars_h[!is.na(time.cov.df$tars_h)]
+norm_tand <- function(df,var){
+  non.na.df <- df[[var]][!is.na(df[[var]])]
+  mean_df <- mean(non.na.df)
+  sd_df <- sqrt(var(non.na.df))
+  return((df[[var]] - mean_df)/sd_df)
+}
+
+no.na.tars_h <- time.cov.df$tars_h[!is.na(time.cov.df$tars_h)]
+time.cov.df$tars_h <- (time.cov.df$tars_h - mean(no.na.tars_h))/sqrt(var(no.na.tars_h))
+
+no.na.nebb_h <- time.cov.df$nebb_h[!is.na(time.cov.df$nebb_h)]
+time.cov.df$nebb_h <- (time.cov.df$nebb_h - mean(no.na.nebb_h))/sqrt(var(no.na.nebb_h))
+
+no.na.nebb_l <- time.cov.df$nebb_l[!is.na(time.cov.df$nebb_l)]
+time.cov.df$nebb_l <- (time.cov.df$nebb_l - mean(no.na.nebb_l))/sqrt(var(no.na.nebb_l))
+
+no.na.ving_h <- time.cov.df$ving_h[!is.na(time.cov.df$ving_h)]
+time.cov.df$ving_h <- (time.cov.df$ving_h - mean(no.na.ving_h))/sqrt(var(no.na.ving_h))
+
+no.na.vekt <- time.cov.df$vekt[!is.na(time.cov.df$vekt)]
+time.cov.df$vekt <- (time.cov.df$vekt - mean(no.na.vekt))/sqrt(var(no.na.vekt))
+
+head(time.cov.df)
+
+hist(time.cov.df$tars_h, xlim = c(-5,5),breaks = 30)
+hist(time.cov.df$nebb_h, xlim = c(-5,5),breaks = 30)
+hist(time.cov.df$nebb_l, xlim = c(-5,5),breaks = 30)
+hist(time.cov.df$ving_h, xlim = c(-5,5),breaks = 30)
+hist(time.cov.df$vekt, xlim = c(-5,5),breaks = 30)
+```
+
+Dato: Thats data
+flok:
+flokb: 
+ringnr: ID
+fieldsex: The sex it is visually seen as in the field
+scriptsex: The sex it is DNA tested as
+scriptage: 
+tars_h: Bird statistic
+nebb_h: Bird statistic
+nebb_l: Bird statistic
+ving_h: Bird statistic
+vekt: Bird statistic
+stage: Only "capt"
+init: Initials of who measured
+hs_id: 0, 1 or NA
+
+We can remove, scriptage.
+
+scriptage i think is information that is used in the field and has to do with the date the bird was first captured or its age. That information is in the other data frame. 
+
+## Data reformating
+
+
+```{r}
+#Note that df used has no na's !! AND WE ARE USING DF.FILLED !!
+#We make a df of the sparrow's, on long format. Then we can transform it to a standard upper diagonal design using previous code i develouped for the Stellar sea lions
+s27.filled.df <- s27.filled.df %>%  # We set filed observation of sex to a number
+  mutate(sex = recode(sex,"f"=1,"u"=5,"m"=0,"pm"=5,"pf"=5))
+#s27.filled.df <- s27.filled.df %>% # Set NA to zero
+#  mutate(sex = ifelse(is.na(sex), 0, sex))
+s27.filled.df <- s27.filled.df %>%
+  mutate(sex = na_if(sex, 5))
+
+unique.id <- sort(unique(s27.filled.df$ID)) #List of all ID's
+n.indi <- length(unique.id)
+
+ch.df <- data.frame()
+x.data.array <- array(NA,dim=c(5,31,n.indi)) #The covariates
+
+census.count <- length(unique(s27.filled.df$year)) #How many censuses we have
+year.min <- min(unique(s27.filled.df$year)) #Finding first year, 1993 #Dont think it is in use
+i <- 1
+for (var.id in unique.id){ #Here we make the data matrices for the model
+  ### The CH df ###
+  all.obs.df <- s27.filled.df[s27.filled.df$ID == var.id,]#All observations of the an individual
+  years.obs <- unique(all.obs.df$year) #The years we observed the individual
+  index.obs <- years.obs - (1993) + (1) #Here 1993 is 1 born
+  first.co <- min(index.obs) #Finding first census observed
+  last.co <- min(max(index.obs+4),30) #Last cohort we simulate ### Here the integer is how much further we simulate the individual from last observation 
+  ch <- rep(0,30)
+  ch[index.obs] <- 1 #Make ch of individual
+  birth.year <- min(all.obs.df$Born_Year) #Birth year from df (it is a given covariate)
+  birth.cohort.ind <- birth.year - (1993) + (1)
+  min.observed.age <- min(all.obs.df$Age) #This is the workaround implementation
+  sex_num <- max(all.obs.df$sex)
+  
+  ### Making X ###
+  all.obs.x.df <- time.cov.df[time.cov.df$ringnr == var.id,]
+  all.obs.x.df <- all.obs.x.df[order(all.obs.x.df$dato,decreasing = FALSE),] #The newest within year covariates are used, from oldest to newest
+  cr <- unique(all.obs.x.df$census) #The unique years of observation
+  census.range <- intersect(cr,index.obs) #To make certain it is observed when we have covariates. This is as the bird might emigrate and then having x.covariates is wrong.
+  for(unique.census in census.range){#We look at each year with data for individual
+    sightings.census <- all.obs.x.df[all.obs.x.df$census == unique.census,]
+    for(index.covariate in 3:7){ #Here the 3:7 is index of c(tars_h,nebb_h,nebb_l,ving_h,vekt)
+      covariate <- sightings.census[,index.covariate] #We assign the newest covariate observed within year
+      index.first.non.NA <- which(!is.na(covariate))[1]
+      eraliest.non.NA <- covariate[index.first.non.NA]
+      x.data.array[index.covariate-2,unique.census,i] <- eraliest.non.NA #Assign covariate
+    }
+  }
+  
+  x.data.array[1,31,i] <- var.id #For data manipulation only
+  x.data.array[2,31,i] <- birth.cohort.ind #For data manipulation only
+  
+  ### Setting everything together ###
+  ch.df <- rbind(ch.df,c(ch,first.co,birth.cohort.ind,min.observed.age,sex_num,var.id,last.co))
+  i <- i + 1
+  
+  
+  if(i %% 500 == 0){
+    cat(" ",round(i/n.indi,2)," ")
+  }
+}
+print("Completed")
+
+
+names.vec <- c()   #Here we give names to the columns
+for (i in c(1:census.count)){names.vec <-c(names.vec,paste0("C",i))}
+names(ch.df) <- c(names.vec,"first_ch","birth_cohort.ind","min_observed_age","sex","id","Last_obs5")
+
+#saveRDS(x.data.array,file="x_simp_array.Rda")
+#saveRDS(ch.df,file="ch_simp_array.Rda")
+
+#Checking
+#5422 observed only at c30
+#3 Male
+#7 Female and first observed at age 1
+
+x.data.array[,,16]
+time.cov.df[time.cov.df$ringnr=="8118442",]
+identical(x.data.array[1,31,],ch.df[,35]) #True is returned
+```
+
+```{r}
+### As there is no if statements in jags or Nimble. We further want to manipulate the data such that we don't have individuals that do not contribute to the likelihood, i.e they are only observed the last census. We also want individuals that are observed the next last census to be a special case as they only have one hidden survival node and not the rest
+old.size <- dim(ch.df)[1]
+for(i in c(1:old.size)){#Remove individuals first observed at ch 30
+  j <- old.size - i + 1 
+  if(ch.df[j,31]=="30"){
+    ch.df <- ch.df[-c(j),]
+    x.data.array <- x.data.array[,,-c(j)]
+  }
+}
+
+#Checking
+new.size <- dim(ch.df)[1]
+dim.x <- dim(x.data.array)
+dim.ch <- dim(ch.df)
+print(dim.x)
+print(dim.ch)
+print(old.size - new.size) #This number checks out with what was found in M2
+#5685 Is the amount of unique individuals found in 
+
+cat("number of individuals,",dim.ch[1],". Amount of unique ID's,", length(unique(ch.df[,35])),". Amoun of non uniqe ID's,",length(ch.df[,35]))
+identical(x.data.array[1,31,],ch.df[,35])
+```
+
+
+```{r}
+###Now we simply sort by first observed
+ordered.ch <- ch.df[order(as.double(as.double(ch.df[,32])),ch.df[,35]),] #Order first by cohort.ind then ID
+ordered.x <- x.data.array[,,order(as.double(x.data.array[2,31,]),x.data.array[1,31,])] #Same here ^
+
+#Checking
+df1 <- as.data.frame(ordered.ch)
+ordered.x[,,242]
+ordered.x[,,243]
+df1[242,]
+df1[243,]
+identical(ordered.x[1,31,], ordered.ch[,35]) #They are ordered the same way and some visual checks has been done
+```
+
+
+```{r}
+#The data is correctly made now. We only need to make 1 alive and 2 dead because of the cat density in Nimble, and overwrite [1,1,] and [2,1,] in ordered.x
+
+#ordered.x[1,1,] <- rep(NA,dim(ordered.x)[3]) #Overwrite temporary ID
+#ordered.x[2,1,] <- rep(NA,dim(ordered.x)[3]) #Overwrite temporary first ch
+
+x.final <- array(as.double(ordered.x[,-c(31),]), dim = dim(ordered.x[,-c(31),]))
+ch.temp <- ordered.ch
+ch.temp[,c(1:34,36)] <- lapply(ch.temp[,c(1:34,36)], as.double)
+ch.temp[,1:30] <- ch.temp[,1:30] * (-1) + 2  #Transform to follow dcat(), i.e 1 alive 2 dead
+ch.final <- ch.temp  #Not transform the extra statistics 
+
+x.final[,,1117]
+ch.final[1117,]
+x.final[,,2024]
+
+```
+
+# Finding missing data index
+
+```{r}
+#Handling temporal data that is censored
+#We only need to identify the data that are not observed. However Both observed and not observed data is found here.
+
+missing.data.finder <- function(x.data,vec.cohort,vec.sim.end){ #Obs, code will crash if first individual has no observations of covariates or only has observation of covariates
+  t.max <- dim(x.data)[2]
+  
+  temp <- x.data[,,1]
+  if(vec.cohort[1]!=0){temp[,1:cohort] <- 1} #Special case of cohort zero. We need the covariates in the first column to predict survival
+  if(vec.sim.end[1]!=30){temp[,vec.sim.end[1]:t.max] <- 1}
+  na_indices <- cbind(which(is.na(temp), arr.ind = TRUE),1) #Here na_indices is defined first
+  
+  temp2 <- x.data[,,1] #This is quite redundant code. Temp1 and 2 is defined the same and if statment is quite similar
+  if(vec.cohort[1]!=0){temp2[,1:cohort] <- NA}
+  if(vec.sim.end[1]!=30){temp2[,vec.sim.end[1]:t.max] <- NA}
+  real_indices <- cbind(which(!is.na(temp2), arr.ind = TRUE),1) #Same as in forloop
+  
+  n.itter <- length(vec.cohort)
+  for(i in 2:n.itter){
+    cohort <- vec.cohort[i]
+    sim.end <- vec.sim.end[i]
+    temp <- x.data[,,i]
+    if(cohort!=0){temp[,1:cohort] <- 1} #No observation for zero year of life
+    if(sim.end!=30){temp[,sim.end:t.max] <- 1} #Overwrite 1 where we don't continue the HMM because of not observing individual for long
+    if(dim(which(is.na(temp2), arr.ind = TRUE))[1]!=0){ #If there are no NA's it crashes
+      which.na <- which(is.na(temp), arr.ind = TRUE)
+      col.i.na <- rep(i,dim(which.na)[1])
+      na_indices <- rbind(na_indices,cbind(which.na,col.i.na))
+    }
+    temp2 <- x.data[,,i]
+    if(cohort!=0){temp2[,1:cohort] <- NA} #No observation for zero year of life
+    if(sim.end!=30){temp2[,sim.end:t.max] <- NA}
+    if(dim(which(!is.na(temp2), arr.ind = TRUE))[1]!=0){ #If there are no Reals it crashes
+      which.real <- which(!is.na(temp2), arr.ind = TRUE)
+      col.i.real <- rep(i,dim(which.real)[1])
+      real_indices <- rbind(real_indices,cbind(which.real,col.i.real))
+    }
+    if(i %% 500 == 0){
+      cat(" ",round(i/n.itter,2)," ")
+    }
+  }
+  return(list(na = na_indices,observe = real_indices))
+}
+
+index <- missing.data.finder(x.final,ch.final[,32],ch.final[,36])
+index.non.last <- missing.data.finder(x.final,ch.final[,32],rep(30,5573))
+
+#testing
+#x.final[,,1] #Birth cohort 0 individual
+#ch.final[1,]
+#index$index.na
+
+#index$index.real[2625:2650,] #It skipps individual that has no observations
+#x.final[,,1005]
+
+dim(index$na)
+dim(index$observe)
+
+dim(index.non.last$na)
+dim(index.non.last$observe)
+
+head(index$observe)
+head(index$na)
+
+#All the rows in a, not found in b
+a <- index.non.last$observe
+b <- index$observe
+
+a[!duplicated(rbind(b,a))[(nrow(b)+1):(nrow(a)+nrow(b))], ] #Its empty which is good. This was solved by introducing the union poerator in x.data cration
+
+```
+
+
+```{r}
+#Handling non temporal data that is NA, i.e sex
+sex.na <- which(is.na(ch.final[,34]), arr.ind = TRUE)
+sex.observe <- which(!is.na(ch.final[,34]), arr.ind = TRUE)
+```
+
+```{r}
+# Here is how many hidden nodes we used to simulate compared to how many we now do simulate with the approximation of assuming that an individual is dead after not observing it for 4 years (or how many census we eventually choose).
+sum(30-(ch.final[,32]-1))
+sum(ch.final[,36]-(ch.final[,32]-1))
+
+cat("How many precent of z nodes remain afther approximation of death:",sum(ch.final[,36]-(ch.final[,32]-1))/sum(30-(ch.final[,32]-1)))
+
+#The way x.data is used now, the data from the census it is born is not used. I thus make a statistic of how much data we are not using
+
+cohort.reduced <- ch.final[,32][-c(1:76)] #Remove zeroth cohort
+x.reduced <- x.final[,,-c(1:76)]
+na.count <- 0
+
+for(i in 1:length(cohort.reduced)){
+  cohort.ind <- cohort.reduced[i]
+  na.count <- na.count + sum(is.na(x.reduced[,cohort.ind,i]))
+  
+}
+cat("
+")
+cat("How many precent all covariates are censored of census that is the cohort of the corresponding individual:",na.count/(length(cohort.reduced)*5))
+
+#Example of this
+#x.final[,,5354]
+#head(cov.na.500[1700:3000,])
+```
+
+
+## Fitting individual model
+
+
+```{r}
+
+N <- dim(ch.final)[1]
+time <- 30
+
+### 1000 different for censoring indexing ###
+#Here we assume that the arrays of indexings are sorted by individual
+index.na <- which(index$na[,3]>(N-501))[1] #Finding index of individ N-500
+index.observe <- which(index$observe[,3]>(N-501))[1] #Finding index of individ N-500
+
+cov.na.500 <- index$na[index.na:dim(index$na)[1],] #Inex collection of last 500 NA
+cov.observe.500 <- index$observe[index.observe:dim(index$observe)[1],] #Inex collection of last 500 observed
+
+#This one with sex I remember is kinda confusing. However I think it does not need to be to well understood as it will be removed for the final model
+N.sex.na.500 <- length(which(is.na(ch.final[(N-500):N,34]), arr.ind = TRUE))
+N.sex.observe.500 <- length(which(!is.na(ch.final[(N-500):N,34]), arr.ind = TRUE))
+
+sex.na.500 <- sex.na[(length(sex.na)-N.sex.na.500):length(sex.na)]
+sex.observe.500 <- sex.observe[(length(sex.observe)-N.sex.observe.500):length(sex.observe)]
+
+### Latent variable model index setup ###
+#beta.order.cov.na.500 <- cov.na.500[order(cov.na.500[,1]),] Just incase i need it
+individual.na.500 <- cov.na.500[,-c(1)] #Removing covariate, now this is purely a matrix of individual since morphological data is assumed to be non temporal
+individual.na.500 <- unique(individual.na.500) 
+
+
+### Z ###
+Z <- array(NA,dim=c(N,30))
+for (i in c((N-500):N)){ ### 1000 Different
+  Z[i,c((ch.final[i,32]+1):30)] <- 1
+}
+
+### W ###
+W <- array(NA,dim=c(5,30,N))
+for (i in c((N-500):N)){ ### 1000 Different
+  W[,c((ch.final[i,32]+1):30),i] <- 0
+}
+
+### Prob_init ###
+prob_init <- rep(0,time)
+prob_init[c(1:26)] <- NA ### 1000 Different
+prob_init_one <- prob_init + 1
+prob_init_neg_one <- prob_init - 1
+
+### Tau_init ###
+#Precision matrix of corr=1/3 with unit variance
+Tau_init <- diag(7)
+Tau_init_low_corr <- diag(7)
+Tau_init_neg_low_corr <- diag(7)
+
+### L_init ###
+L_init <- matrix(0,nrow=5,ncol=2)
+L_init_pluss <- L_init + 1
+L_init_minus <- L_init - 1
+
+### f_init ###
+
+f_init <- array(NA, dim = dim(x.final)[c(2,3)]) #This is starting values for one latent variable
+for(i in 1:dim(individual.na.500)[1]){
+  f_init[individual.na.500[i,1],individual.na.500[i,2]] <- 0
+}
+f_init_final <- array(c(f_init, f_init), dim = c(dim(f_init),2)) #We take two coppies and glue them together in to get three dimensional starting values for latent variables
+
+f_init_final_pluss <- f_init_final + 1
+f_init_final_minus <- f_init_final - 1
+
+##Deal with initial values
+inits.1 <-  list(prob_norm = prob_init, #N*1
+       a = 0,
+       b = 1,
+       
+       sex.prob = 1/2,
+       
+       Tau_beta = Tau_init, # p*p
+       mu_beta = rep(0,7), # p*1
+       beta = rep(0,7), # p*1
+       
+       L = L_init,
+       L_tau = 2,
+       f = f_init_final_minus,
+       individual_tau_lmv = rep(2,5),
+       
+       z = Z) #N*time
+
+inits.2 <-  list(prob_norm = prob_init_one,
+       a = -1,
+       b = 1/2,
+       
+       sex.prob = 3/4,
+       
+       Tau_beta = Tau_init_low_corr,
+       mu_beta = rep(-1,7),
+       beta = rep(1,7),
+       
+       L = L_init_pluss,
+       L_tau = 1/2,
+       f = f_init_final_pluss,
+       individual_tau_lmv = rep(1,5),
+       
+       z = Z)
+
+inits.3 <-  list(prob_norm = prob_init_neg_one,
+       a = 1,
+       b = 2,
+       
+       sex.prob = 1/4,
+       
+       Tau_beta = Tau_init_neg_low_corr,
+       mu_beta = rep(1,7),
+       beta = rep(-1,7),
+       
+       L = L_init_pluss,
+       L_tau = 1,
+       f = f_init_final,
+       individual_tau_lmv = rep(1/2,5),
+       
+       z = Z)
+
+
+initsLIST = list(inits.1,
+                inits.2,
+                inits.3)
+
+
+
+##Data
+Modeldata <- list(y=ch.final[,-c(31:35)],
+                  x=x.final, 
+                  sex = ch.final[,34])
+
+modelConst <- list(N=N,time=30,
+                   cohort.ind=ch.final[,32],
+                   cohort.end=ch.final[,36], #zeroth.cohort=76,
+                   
+                   beta_n = 7,
+                   mu_beta_mu = rep(0,7),
+                   mu_beta_var = diag(7),
+                   Identity=diag(7),
+                   
+                   X.na=cov.na.500, X.na.length=dim(cov.na.500)[1],
+                   X.individual=individual.na.500, 
+                   X.individual.length=dim(individual.na.500)[1], #This is all "individuals" (t and n) that have censored covariates vec.with.beta.index
+                   
+                   sex.na=sex.na.500,
+                   na.sex.length=length(sex.na.500))
+                   
+#                   factor_mu=rep(0,2), #Why did this not work?
+#                   factor_tau=diag(2))
+### 1000 different                   
+#                   na.index=dim(index$na)[1],
+#                   X.na=index$na,
+                   
+#                   na.sex.index=length(sex.na),
+#                   sex.na=sex.na,
+
+#                   zeroth.cohort = 76)
+
+          
+
+#parameters to save
+params <- c("rho","varians",                #Density approximation of precision
+            "mu_beta",# "Tau_beta",               #Precision of cohort.ind survival rate
+            "beta",                    #The cohort.ind survival
+            "prob_norm","a","b",       #Observe prob
+            "sex.prob",
+            "L","L_tau","individual_tau_lmv")      #Prior for sex hyperparameter
+
+```
+
+
+```{r}
+beta.index=vec.with.beta.index
+X.na=beta.order.cov.na.500
+mat <- matrix(0,nrow=1,ncol=3)
+for(i in 1:5){
+  for(indecies in (beta.index[i]+1):beta.index[i+1]){ 
+    mat <- rbind(mat,c(X.na[indecies,1],X.na[indecies,2],X.na[indecies,3]))
+  } 
+}
+
+identical(mat[-c(1),],X.na)
+```
+
+
+
+
+```{r}
+
+N <- dim(ch.final)[1]
+time <- 30
+
+model.hidden <- nimbleCode({
+  a ~ dnorm(0,1) #Hyperprior for prob detection
+  b ~ dexp(1) #Hyperprior for prob detection
+  sex.prob ~ dbeta(1,1) #Hyper Prior for Age
+  
+  mu_beta[1:beta_n] ~ dmnorm(mu_beta_mu[1:beta_n], mu_beta_var[1:beta_n,1:beta_n]) #Hyper prior for mean of beta
+  Tau_beta[1:beta_n,1:beta_n] ~ dwish(Identity[1:beta_n,1:beta_n],beta_n+1) #Hyper prior for mean of beta
+  beta[1:beta_n] ~ dmnorm(mu_beta[1:beta_n],Tau_beta[1:beta_n,1:beta_n]) #Beta
+  
+
+  L_tau ~ dexp(1) 
+  for(index in 1:X.na.length){ # X.na[index,1] is p, X.na[index,2] is t, X.na[index,2] is i
+    x[X.na[index,1],X.na[index,2],X.na[index,3]] ~ dnorm(lvm_mu[X.na[index,1],X.na[index,2],X.na[index,3]],individual_tau_lmv[X.na[index,1]])
+    # x[p,t,i] ~ dnorm(lvm_mu[p,t,i],lvm_sigma[p]) one can think of t,i making up n
+    lvm_mu[X.na[index,1],X.na[index,2],X.na[index,3]] <- L[X.na[index,1],1]*f[X.na[index,2],X.na[index,3],1]+L[X.na[index,1],2]*f[X.na[index,2],X.na[index,3],2]
+    #lvm_mu[p,t,i] <- L[p,1]*f[t,i]+L[p,2]*f[t,i]
+  }
+  for(index in 1:X.individual.length){
+    f[X.individual[index,1],X.individual[index,2],1] ~ dnorm(0,1) #Prior for factors
+    f[X.individual[index,1],X.individual[index,2],2] ~ dnorm(0,1)
+  }
+  for(index in 1:5){
+    L[index,1] ~ dnorm(0,L_tau) #Prior for factor loadings
+    L[index,2] ~ dnorm(0,L_tau)
+    individual_tau_lmv[index] ~ dexp(1)
+  }
+
+
+  
+  for(index in 1:na.sex.length){ #Handeling of censoring of sex
+    sex[sex.na[index]] ~ dbinom(size=1, prob=sex.prob)
+  }
+  
+  for(t in 27:time){ #Heirarchial system for prob
+    prob_norm[t] ~ dnorm(a,b)
+    logit(prob[t]) <- prob_norm[t]
+    
+    Lambda[1,1,t] <- prob[t]      # Pr(alive t -> observe alive t)
+    Lambda[1,2,t] <- 1 - prob[t]  # Pr(alive t -> observe dead t)
+    Lambda[2,1,t] <- 0             # Pr(dead t -> observe alive t)
+    Lambda[2,2,t] <- 1             # Pr(dead t -> observe dead t)
+    
+  }
+  '
+  for(i in 1:zeroth.cohort){#Zeroth cohort special case
+    z[i,cohort.ind[i]] <- 1 #Initialization with prob of detecting
+    #No observations were done in year 1992, thus no observation
+    
+    
+    
+    for(t in (cohort.ind[i] + 1):cohort.end[i]){
+      logit(phi[i,t]) <- beta[1] + beta[2]*sex[i] + beta[3]*x[1,t,i] + beta[4]*x[2,t,i] + beta[5]*x[3,t,i] + beta[6]*x[4,t,i] + beta[7]*x[5,t,i] 
+      
+      Gamma[1,1,i,t] <- phi[i,t]      # Pr(alive t-1 -> alive t)
+      Gamma[1,2,i,t] <- 1 - phi[i,t]  # Pr(alive t-1 -> dead t)
+      Gamma[2,1,i,t] <- 0             # Pr(dead t-1 -> alive t)
+      Gamma[2,2,i,t] <- 1             # Pr(dead t-1 -> dead t)
+    
+      z[i,t] ~ dcat(Gamma[z[i,t-1],1:2,i,t])  #Here z[i,t-1] is previous hidden state
+      y[i,t] ~ dcat(Lambda[z[i,t],1:2,t])
+    }
+  }
+  '
+  
+  for(i in (N-500):N){ #Likelihood and hierarchical system of the probability     t0 <- cohort.ind[i] + 1
+
+    z[i,cohort.ind[i]] <- 1 #Initialization with prob of detecting, Could this be cat(c(1,0))? or ber(1)?
+    y[i,cohort.ind[i]] ~ dcat(Lambda[z[i,cohort.ind[i]],1:2,cohort.ind[i]])
+    
+    for(t in (cohort.ind[i] + 1):cohort.end[i]){
+      logit(phi[i,t]) <- beta[1] + beta[2]*sex[i] + beta[3]*x[1,t,i] + beta[4]*x[2,t,i] + beta[5]*x[3,t,i] + beta[6]*x[4,t,i] + beta[7]*x[5,t,i] 
+      
+      Gamma[1,1,i,t] <- phi[i,t]      # Pr(alive t-1 -> alive t)
+      Gamma[1,2,i,t] <- 1 - phi[i,t]  # Pr(alive t-1 -> dead t)
+      Gamma[2,1,i,t] <- 0             # Pr(dead t-1 -> alive t)
+      Gamma[2,2,i,t] <- 1             # Pr(dead t-1 -> dead t)
+    
+      z[i,t] ~ dcat(Gamma[z[i,t-1],1:2,i,t])  #Here z[i,t-1] is previous hidden state
+      y[i,t] ~ dcat(Lambda[z[i,t],1:2,t])
+    }
+  }
+
+  #Estimation of Covariance
+  Sigma[1:7,1:7] <- inverse(Tau_beta[1:7,1:7])
+  for (k in 1:7){
+    for (l in c(1:7)){
+      rho[k,l] <- Sigma[k,l]/sqrt(Sigma[k,k]*Sigma[l,l])
+    }
+    varians[k] <- sqrt(Sigma[k,k])
+  }
+  
+})
+
+
+start_time <- proc.time()
+mcmc.output.probNphi <- nimbleMCMC(code = model.hidden,
+                          data = Modeldata,
+                          constants = modelConst,
+                          inits = initsLIST,
+                          monitors = params,
+                          thin = 5,
+                          niter = 10000,
+                          nburnin = 5000,
+                          nchains = 3)
+end_time <- proc.time()
+print(end_time-start_time)
+```
+
+```{r}
+#write.csv(mc.df, "C:\\Users\\Martinius T.S\\Documents\\MSMNFMA\\Master related\\Saved data\\.csv")
+
+mc1.df <- as.data.frame(mcmc.output.probNphi$chain1)
+mc2.df <- as.data.frame(mcmc.output.probNphi$chain2)
+mc3.df <- as.data.frame(mcmc.output.probNphi$chain3)
+names(mc1.df) <- paste(names(mc1.df),1,sep="")
+names(mc2.df) <- paste(names(mc2.df),2,sep="")
+names(mc3.df) <- paste(names(mc3.df),3,sep="")
+mc.df <- cbind(mc1.df,mc2.df,mc3.df)
+head(mc.df)
+
+mc.df$`prob_norm[27]1` <- inv.logit(mc.df$`prob_norm[27]1`)
+mc.df$`prob_norm[27]2` <- inv.logit(mc.df$`prob_norm[27]2`)
+mc.df$`prob_norm[27]3` <- inv.logit(mc.df$`prob_norm[27]3`)
+
+mc.df$`prob_norm[28]1` <- inv.logit(mc.df$`prob_norm[28]1`)
+mc.df$`prob_norm[28]2` <- inv.logit(mc.df$`prob_norm[28]2`)
+mc.df$`prob_norm[28]3` <- inv.logit(mc.df$`prob_norm[28]3`)
+
+mc.df$`prob_norm[29]1` <- inv.logit(mc.df$`prob_norm[29]1`)
+mc.df$`prob_norm[29]2` <- inv.logit(mc.df$`prob_norm[29]2`)
+mc.df$`prob_norm[29]3` <- inv.logit(mc.df$`prob_norm[29]3`)
+
+mc.df$`prob_norm[30]1` <- inv.logit(mc.df$`prob_norm[30]1`)
+mc.df$`prob_norm[30]2` <- inv.logit(mc.df$`prob_norm[30]2`)
+mc.df$`prob_norm[30]3` <- inv.logit(mc.df$`prob_norm[30]3`)
+
+mc.df$index <- 1:dim(mc.df)[1] 
+head(mc.df)
+
+df_long <- pivot_longer(mc.df,cols = c('L[1, 1]1',"L[1, 1]2","L[1, 1]3"), names_to = "series", values_to = "value")
+df_long <- pivot_longer(mc.df,cols = c("L[1, 2]1","L[1, 2]2","L[1, 2]3"), names_to = "series", values_to = "value")
+df_long <- pivot_longer(mc.df,cols = c("beta[1]1","beta[1]2","beta[1]3"), names_to = "series", values_to = "value")
+
+
+df_long <- pivot_longer(mc.df,cols = c("beta[1]1","beta[1]2","beta[1]3"), names_to = "series", values_to = "value")
+df_long <- pivot_longer(mc.df,cols = c("beta[2]1","beta[2]2","beta[2]3"), names_to = "series", values_to = "value")
+df_long <- pivot_longer(mc.df,cols = c("beta[3]1","beta[3]2","beta[3]3"), names_to = "series", values_to = "value")
+df_long <- pivot_longer(mc.df,cols = c("beta[4]1","beta[4]2","beta[4]3"), names_to = "series", values_to = "value")
+
+df_long <- pivot_longer(mc.df,cols = c("beta[7]1","beta[7]2","beta[7]3"), names_to = "series", values_to = "value")
+df_long <- pivot_longer(mc.df,cols = c("a1","a2","a3"), names_to = "series", values_to = "value")
+df_long <- pivot_longer(mc.df,cols = c("b1","b2","b3"), names_to = "series", values_to = "value")
+df_long <- pivot_longer(mc.df,cols = c("prob_norm[29]1","prob_norm[29]2","prob_norm[29]3"), names_to = "series", values_to = "value")
+
+
+ggplot(df_long, aes(x = 1:3000, y = value, color = series)) +
+  geom_line() +
+  theme_minimal()
+
+
+ggplot(df_long, aes(x = value, color = series)) +
+  geom_density(size = 1.2) +
+  theme_minimal()
+
+
+
+```
+
+
